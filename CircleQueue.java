@@ -63,16 +63,36 @@ final public class CircleQueue<E> extends AbstractQueue<E> {
 
         Supplier<Boolean> offerElement = () -> {
             if (size == 0) {
+                
                 ringBuffer[tailIndex] = e;
                 modificationsCount++;
                 size++;
             } else if (size == maxSize) { //已经跑完一轮了
-                headIndex = nextIndex(headIndex);
+                //headIndex = nextIndex(headIndex);
                 tailIndex = nextIndex(tailIndex);
+                if(tailIndex == headIndex) { //if the tailIndex equals to the headIndex, should we spin to wait?
+                    do{ //
+                        LockSupport.parkNanos(5);
+                        if(tailIndex != headIndex){
+                            break;
+                        }
+                    }while(true);
+                }
+
                 ringBuffer[tailIndex] = e;
                 modificationsCount++;
             } else {
                 tailIndex = nextIndex(tailIndex);
+
+                if(tailIndex == headIndex) { //if the tailIndex equals to the headIndex, should we spin to wait?
+                    do{ //
+                        LockSupport.parkNanos(5);
+                        if(tailIndex != headIndex){
+                            break;
+                        }
+                    }while(true);
+                }
+
                 ringBuffer[tailIndex] = e;
                 size++;
                 modificationsCount++;
