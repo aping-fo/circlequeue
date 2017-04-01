@@ -13,7 +13,7 @@ import java.util.function.Supplier;
  同时可以很好的展示 ConcurrentModificationException 是如何发生的，可以深入了解集合相关的东西
  Java8环境
 */
-public class CircleQueue<E> extends AbstractQueue<E> {
+final public class CircleQueue<E> extends AbstractQueue<E> {
 
     private static final String ILLEGAL_CAPACITY = "Capacity must be bigger than 0";
     private static final String ILLEGAL_ELEMENT = "Element must not be null";
