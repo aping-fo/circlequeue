@@ -1,6 +1,3 @@
-
-package io.github.resilience4j.circularbuffer;
-
 import static java.lang.reflect.Array.newInstance;
 import static java.util.Objects.requireNonNull;
 
