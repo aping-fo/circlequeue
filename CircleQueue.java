@@ -7,6 +7,8 @@ import java.util.Iterator;
 import java.util.NoSuchElementException;
 import java.util.concurrent.locks.StampedLock;
 import java.util.function.Supplier;
+import java.util.concurrent.locks.Condition;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  一个简单的循环队列，大家练手的好demo
@@ -15,7 +17,7 @@ import java.util.function.Supplier;
 */
 final public class CircleQueue<E> extends AbstractQueue<E> {
 
-    private static final String ILLEGAL_CAPACITY = "Capacity must be bigger than 0";
+       private static final String ILLEGAL_CAPACITY = "Capacity must be bigger than 0";
     private static final String ILLEGAL_ELEMENT = "Element must not be null";
     private static final String ILLEGAL_DESTINATION_ARRAY = "Destination array must not be null";
     private static final Object[] DEFAULT_DESTINATION = new Object[0];
@@ -25,11 +27,16 @@ final public class CircleQueue<E> extends AbstractQueue<E> {
     private volatile int size;
     private volatile int modificationsCount;
     private final StampedLock stampedLock;
+
+    private final ReentrantLock lock = new ReentrantLock();
+    private final Condition notFull = lock.newCondition();
+    private final Condition notEmpty = lock.newCondition();
+
     private Object[] ringBuffer;
     private int headIndex;
     private int tailIndex;
 
-    public CircleQueue(int capacity) {
+    public ConcurrentEvictingQueue(int capacity) {
         if (capacity <= 0) {
             throw new IllegalArgumentException(ILLEGAL_CAPACITY);
         }
@@ -47,15 +54,11 @@ final public class CircleQueue<E> extends AbstractQueue<E> {
         return readConcurrently(() -> new Iter(headIndex, modificationsCount));
     }
 
-    /**
-     * Returns the number of elements in this queue.
-     *
-     * @return the number of elements in this queue
-     */
     @Override
     public int size() {
         return size;
     }
+
 
     @Override
     public boolean offer(final E e) {
@@ -63,40 +66,19 @@ final public class CircleQueue<E> extends AbstractQueue<E> {
 
         Supplier<Boolean> offerElement = () -> {
             if (size == 0) {
-                
                 ringBuffer[tailIndex] = e;
                 modificationsCount++;
                 size++;
-            } else if (size == maxSize) { //已经跑完一轮了
-                //headIndex = nextIndex(headIndex);
+            }
+            else {
                 tailIndex = nextIndex(tailIndex);
-                if(tailIndex == headIndex) { //if the tailIndex equals to the headIndex, should we spin to wait?
-                    do{ //
-                        LockSupport.parkNanos(5);
-                        if(tailIndex != headIndex){
-                            break;
-                        }
-                    }while(true);
-                }
-
-                ringBuffer[tailIndex] = e;
-                modificationsCount++;
-            } else {
-                tailIndex = nextIndex(tailIndex);
-
-                if(tailIndex == headIndex) { //if the tailIndex equals to the headIndex, should we spin to wait?
-                    do{ //
-                        LockSupport.parkNanos(5);
-                        if(tailIndex != headIndex){
-                            break;
-                        }
-                    }while(true);
-                }
-
+                while(headIndex == tailIndex) 
+                    notFull.await();
                 ringBuffer[tailIndex] = e;
                 size++;
                 modificationsCount++;
             }
+            notEmpty.signal();
             return true;
         };
         return writeConcurrently(offerElement);
@@ -110,7 +92,9 @@ final public class CircleQueue<E> extends AbstractQueue<E> {
     public E poll() {
         Supplier<E> pollElement = () -> {
             if (size == 0) {
-                return null;
+                //return null;
+                while (count == 0)
+                    notEmpty.await();
             }
             E result = (E) ringBuffer[headIndex];
             ringBuffer[headIndex] = null;
@@ -119,6 +103,7 @@ final public class CircleQueue<E> extends AbstractQueue<E> {
             }
             size--;
             modificationsCount++;
+            notFull.signal();
             return result;
         };
         return writeConcurrently(pollElement);
@@ -138,10 +123,6 @@ final public class CircleQueue<E> extends AbstractQueue<E> {
         });
     }
 
-    /**
-     * Atomically removes all of the elements from this queue.
-     * The queue will be empty after this call returns.
-     */
     @Override
     public void clear() {
         Supplier<Object> clearStrategy = () -> {
@@ -237,41 +218,33 @@ final public class CircleQueue<E> extends AbstractQueue<E> {
 
     private <T> T readConcurrently(final Supplier<T> readSupplier) {
         T result;
-        long stamp;
-        for (int i = 0; i < RETRIES; i++) {
-            stamp = stampedLock.tryOptimisticRead();
-            result = readSupplier.get();
-            if (stampedLock.validate(stamp)) {
-                return result;
-            }
-        }
-        stamp = stampedLock.readLock();
+        lock.lock();
         try {
             result = readSupplier.get();
         } finally {
-            stampedLock.unlockRead(stamp);
+            lock.unlock();
         }
         return result;
     }
 
     private <T> T readConcurrentlyWithoutSpin(final Supplier<T> readSupplier) {
         T result;
-        long stamp = stampedLock.readLock();
+        lock.lock();
         try {
             result = readSupplier.get();
         } finally {
-            stampedLock.unlockRead(stamp);
+            lock.unlock();
         }
         return result;
     }
 
     private <T> T writeConcurrently(final Supplier<T> writeSupplier) {
         T result;
-        long stamp = stampedLock.writeLock();
+        lock.lock();
         try {
             result = writeSupplier.get();
         } finally {
-            stampedLock.unlockWrite(stamp);
+            lock.unlock();
         }
         return result;
     }
